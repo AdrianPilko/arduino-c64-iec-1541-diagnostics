@@ -13,11 +13,16 @@
 
 #define IEC_TRUE 0
 #define IEC_FALSE 1
-#define INIT_DEBUG_OUT_TIMER 10000
+#define INIT_DEBUG_OUT_TIMER 60000
+#define INIT_DEBUG_OUT_TIMER2 80000
 #define IEC_1541_DATA  2 
-#define IEC_1541_CLOCK  3
+#define IEC_1541_CLOCK  6
 #define IEC_1541_ATN  4
 #define IEC_1541_RESET  5
+
+typedef enum _busMode {e_select, e_data} t_busMode;
+typedef enum _busDeviceState {e_listener, e_talker} t_busDeviceState ;
+
 // the other connections are just ground and SRQ which isn't used here
 // from the computer female port they are numbered like this (note notch at top of the DIN 6 connector)
 //      
@@ -27,90 +32,144 @@
 //
 //  CLK   (4)         (2)  GROUND
 //              (3) ATN
+void waitForATN()
+{
+  Serial.println("waitForATN()");
+  pinMode(IEC_1541_ATN, INPUT);
+  long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
+  
+  while (digitalRead(IEC_1541_ATN) != IEC_FALSE)
+  {
+     if (debugOutputTimer <= 0)
+     {
+        Serial.println("A"); 
+        debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
+     }
+     debugOutputTimer--;
+  }
+}
+
+void waitForClockHigh()
+{
+  Serial.println("waitForClockHigh()");
+  bool clockState = IEC_TRUE;  // set by digital read but initialising anyway
+  pinMode(IEC_1541_CLOCK, INPUT);
+  long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
+  
+  // sit here waiting for the clock line to go false (IEC_FALSE 5V)
+  while (digitalRead(IEC_1541_CLOCK) == IEC_TRUE)
+  {
+     if (debugOutputTimer <= 0)
+     {
+        Serial.print("C"); 
+        debugOutputTimer = INIT_DEBUG_OUT_TIMER;
+     }
+     debugOutputTimer--;
+  }
+  Serial.print("read Clock=");
+  Serial.println(clockState);
+  Serial.println("wrote data IEC_TRUE");
+
+}
+
+void assertDataHigh()
+{
+  Serial.println("assertDataHigh()");
+  pinMode(IEC_1541_DATA, OUTPUT);
+  digitalWrite(IEC_1541_DATA, IEC_TRUE);  
+}
+
+void assertDataLow()
+{
+  Serial.println("assertDataLow()");
+  pinMode(IEC_1541_DATA, OUTPUT);
+  digitalWrite(IEC_1541_DATA, IEC_TRUE);  
+}
+void waitForData()
+{
+  Serial.println("waitForData()");
+  bool dataState =  IEC_FALSE;
+  Serial.println("waiting for data to go IEC_TRUE");
+  pinMode(IEC_1541_DATA, INPUT);
+  
+  long debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
+  
+  while (digitalRead(IEC_1541_DATA) == IEC_TRUE)
+  {   
+     if (debugOutputTimer <= 0)
+     {
+       Serial.println("D"); 
+       debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
+     }
+     debugOutputTimer--;    
+  }
+  Serial.println("Data line now false");
+}
+
+void readData()
+{
+  Serial.println("readData()");
+  // set both clock and data to input
+  long debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
+  pinMode(IEC_1541_DATA, INPUT);
+  pinMode(IEC_1541_CLOCK, INPUT);
+
+  while (digitalRead(IEC_1541_CLOCK) == IEC_FALSE)
+  {
+  }       
+  
+  int data = digitalRead(IEC_1541_DATA);
+  Serial.print(data);      
+  Serial.println();
+
+  debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
+  while (digitalRead(IEC_1541_CLOCK) == IEC_TRUE)
+  {
+  }       
+  Serial.println("CLOCK went true = 0V");
+}
+
+bool checkATN()
+{
+    pinMode(IEC_1541_ATN, INPUT);
+    return digitalRead(IEC_1541_ATN);
+}
 
 void diagnoseComputer()
 {
-  byte loop = 0;
+  byte loop = 0;  
+
+  long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
+  t_busDeviceState state = e_listener;
+  t_busMode mode = e_select;
+  
   // comms start
   pinMode(IEC_1541_DATA, OUTPUT);
   pinMode(IEC_1541_CLOCK, INPUT);
   pinMode(IEC_1541_ATN, INPUT);
   pinMode(IEC_1541_RESET, INPUT);
 
-  while(loop++ < 10)
+  while (1)
   {
-    bool clockState = IEC_TRUE;  // set by digital read but initialising anyway
-    bool dataState =  IEC_TRUE;
-    short debugOutputTimer = INIT_DEBUG_OUT_TIMER;
-    // initially the talk holds the clock to true
-    //         , the listener holds data to true
-    digitalWrite(IEC_1541_DATA, IEC_TRUE);
-    clockState = digitalRead(IEC_1541_CLOCK);    
-    Serial.print("read Clock=");
-    Serial.println(clockState);
-    Serial.println("wrote data IEC_TRUE");
-
-    // sit here waiting for the clock line to go false (IEC_FALSE 5V)
-    while (digitalRead(IEC_1541_CLOCK) == IEC_TRUE)
+    switch (mode)
     {
-       if (debugOutputTimer <= 0)
-       {
-          Serial.print("C"); 
-          debugOutputTimer = INIT_DEBUG_OUT_TIMER;
-       }
-       debugOutputTimer--;
-    }
-    Serial.println("talker released clock line to false");  
-
-    // the listener must respond by releasing the data line to FALSE
-    digitalWrite(IEC_1541_DATA, IEC_FALSE);
-    Serial.println("listener released clock line to false");  
-
-    // if 200msec pass before the data line goes back to true (usually within 60msec)
-    // then the listener must perform EOI
-    Serial.println("waiting for data to go IEC_TRUE");
-    pinMode(IEC_1541_DATA, INPUT);
-
-    int after = 0;
-    int before = millis();    
-    while (dataState == IEC_FALSE)
-    {
-      dataState = digitalRead(IEC_1541_DATA);      
-    }
-    after = millis();
-    int delayTimeMS= after - before ;
-    if (delayTimeMS > 200) 
-    {
-      Serial.println("took longer than 200msec EOI exiting back to main loop");
-      return;
-    }
-    else
-    {
-      Serial.println("Ready to read data");
-      // set both clock and data to input
-      pinMode(IEC_1541_DATA, INPUT);
-      pinMode(IEC_1541_CLOCK, INPUT);
-
-      loop = 0;
-      // eventually need to control this properly  (ie end of tx + response from listener)
-      while (loop++ < 10000)
-      {
-        clockState = digitalRead(IEC_1541_CLOCK);        
-        // data pin only valid on clock transition low to high
-        while (digitalRead(IEC_1541_CLOCK) == IEC_TRUE)
-        {
-          // waiting for clock to go HIGH, IEC_FALSE
-        }        
-        bool data = digitalRead(IEC_1541_DATA);
-        Serial.print(data);      
-        if (loop % 50 == 0) Serial.println();
-
-        while (digitalRead(IEC_1541_CLOCK) == IEC_FALSE)
-        {
-          // waiting for clock to go low again
-        }        
-      }
-    }    
+      // initially the talk holds the clock to true
+      //         , the listener holds data to true
+      //         , only start when ATN goes low
+      case e_select: 
+                waitForATN();
+                mode = e_data;
+            break;
+       case e_data:
+                assertDataHigh();
+                waitForClockHigh();              
+                assertDataLow();
+                waitForData();
+                Serial.println("Ready to read data");
+                readData();
+                break;
+       default: break;
+     };
   }
 }
 
