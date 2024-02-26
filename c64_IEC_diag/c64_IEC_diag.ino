@@ -52,58 +52,36 @@ void waitForATN()
 void waitForClock(bool level)
 {
   Serial.println("waitForClock()");
-  bool clockState;
+  bool clockState = digitalRead(IEC_1541_CLOCK);
   pinMode(IEC_1541_CLOCK, INPUT);
-  long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
 
-  clockState = digitalRead(IEC_1541_CLOCK);
+  
   // sit here waiting for the clock line to go false (IEC_FALSE 5V)
   while (clockState != level)
   {
      clockState = digitalRead(IEC_1541_CLOCK);
-     if (debugOutputTimer <= 0)
-     {
-        Serial.print("C"); 
-        debugOutputTimer = INIT_DEBUG_OUT_TIMER;
-     }
-     debugOutputTimer--;
   }
   Serial.print("read Clock=");
   Serial.println(clockState);
 }
 
-void assertData(bool level)
+void assertData(bool level, int msec)
 {
   Serial.print("assertData() ");
   Serial.println(level);
   pinMode(IEC_1541_DATA, OUTPUT);
   digitalWrite(IEC_1541_DATA, IEC_FALSE);  
+  delay(msec);
+  pinMode(IEC_1541_DATA, INPUT);
 }
 
-void waitForData(bool level)
+
+void holdData(bool level)
 {
-  Serial.println("waitForData()");
-  pinMode(IEC_1541_DATA, INPUT);
-  
-  bool dataState = digitalRead(IEC_1541_DATA);
-  
-  Serial.print("waiting for data to go ");
+  Serial.print("assertData() ");
   Serial.println(level);
-  
-  long debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
-  
-  while (dataState != level)
-  {   
-     dataState = digitalRead(IEC_1541_DATA);
-     if (debugOutputTimer <= 0)
-     {
-       Serial.println("D"); 
-       debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
-     }
-     debugOutputTimer--;    
-  }
-  Serial.print("Data line now ");
-  Serial.println(dataState);
+  pinMode(IEC_1541_DATA, OUTPUT);
+  digitalWrite(IEC_1541_DATA, IEC_FALSE);  
 }
 
 void readData(byte numRead)
@@ -115,24 +93,23 @@ void readData(byte numRead)
   long debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
   pinMode(IEC_1541_DATA, INPUT);
   pinMode(IEC_1541_CLOCK, INPUT);
-
-  delay(30);
+  
   byte data = 0x00;
   
   for (byte i = 0; i < numRead; i++)
   {
-    while (digitalRead(IEC_1541_CLOCK) == IEC_TRUE)
-    {
-    }       
-    delay(10);
+    waitForClock(IEC_TRUE);   
+    
+    delay(20);
   
     byte temp = digitalRead(IEC_1541_DATA);
-    data = data << 1; 
-    data != temp;    
+    data = (data << 1 )| temp;    
+    waitForClock(IEC_FALSE);   
   }
-  assertData(IEC_TRUE); // acknowledge
-  Serial.println(data);         
-  Serial.println("CLOCK went true = 0V");
+  assertData(IEC_TRUE,50); // acknowledge
+  Serial.print("******* data = ");           
+  Serial.println(data);
+  Serial.println();
 }
 
 bool checkATN()
@@ -143,7 +120,7 @@ bool checkATN()
 
 void diagnoseComputer()
 {
-  byte loop = 0;  
+  int mainLoopCount = 0;
 
   long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
   t_busDeviceState state = e_listener;
@@ -156,8 +133,6 @@ void diagnoseComputer()
   pinMode(IEC_1541_RESET, OUTPUT);
 
   digitalWrite(IEC_1541_RESET, IEC_FALSE);
-  
-  assertData(IEC_TRUE);
 
   while (1)
   {
@@ -171,13 +146,16 @@ void diagnoseComputer()
                 mode = e_data;
             break;
        case e_data:                
-                waitForClock(IEC_FALSE);                             
-                assertData(IEC_FALSE);
+                holdData(IEC_TRUE);                
+                waitForClock(IEC_TRUE);
+                waitForClock(IEC_FALSE);                
+                assertData(IEC_FALSE,10);                
                 waitForClock(IEC_TRUE);                
                 readData(8); // read 8 bits then ack                
                 break;
        default: break;
      };
+     Serial.println(mainLoopCount++);
   }
 }
 
@@ -206,9 +184,10 @@ void loop()
   Serial.println();
   Serial.write("Enter mode - 1==diagnose computer, 2== diagnose drive, 3==listen to bus");
   Serial.println();  
-  while (Serial.available() <= 0) delay(20);
-  commandMode = Serial.read();
-  Serial.println(commandMode);
+  //while (Serial.available() <= 0) delay(20);
+  //commandMode = Serial.read();
+  //Serial.println(commandMode);
+  commandMode = '1';
 
   switch (commandMode)
   {
