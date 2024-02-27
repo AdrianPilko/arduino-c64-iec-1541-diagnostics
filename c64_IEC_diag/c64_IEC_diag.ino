@@ -98,15 +98,15 @@ void readData(byte numRead)
   
   for (byte i = 0; i < numRead; i++)
   {
-    waitForClock(IEC_TRUE);   
+    waitForClock(IEC_FALSE);   
     
-    delay(20);
+    delay(5);
   
     byte temp = digitalRead(IEC_1541_DATA);
-    data = (data << 1 )| temp;    
-    waitForClock(IEC_FALSE);   
+    data = (data << 1 ) | (0×01 & temp);    
+    waitForClock(IEC_TRUE);   
   }
-  assertData(IEC_TRUE,50); // acknowledge
+  holdData(IEC_TRUE); // acknowledge
   Serial.print("******* data = ");           
   Serial.println(data);
   Serial.println();
@@ -149,7 +149,7 @@ void diagnoseComputer()
                 holdData(IEC_TRUE);                
                 waitForClock(IEC_TRUE);
                 waitForClock(IEC_FALSE);                
-                assertData(IEC_FALSE,10);                
+                holdData(IEC_FALSE);                
                 waitForClock(IEC_TRUE);                
                 readData(8); // read 8 bits then ack                
                 break;
