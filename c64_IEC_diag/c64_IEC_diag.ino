@@ -15,7 +15,7 @@
 #define IEC_FALSE 1
 #define INIT_DEBUG_OUT_TIMER 60000
 #define INIT_DEBUG_OUT_TIMER2 80000
-#define IEC_1541_DATA  2 
+#define IEC_1541_DATA  7 
 #define IEC_1541_CLOCK  6
 #define IEC_1541_ATN  4
 #define IEC_1541_RESET  5
@@ -32,9 +32,33 @@ typedef enum _busDeviceState {e_listener, e_talker} t_busDeviceState ;
 //
 //  CLK   (4)         (2)  GROUND
 //              (3) ATN
+
+// from https://forum.arduino.cc/t/getpinmode/232960
+int getPinMode(uint8_t pin)
+{
+  uint8_t bit = digitalPinToBitMask(pin);
+  uint8_t port = digitalPinToPort(pin);
+  volatile uint8_t *reg, *out;
+
+  if (port == NOT_A_PIN) return -1;
+
+  // JWS: can I let the optimizer do this?
+  reg = portModeRegister(port);
+  out = portOutputRegister(port);
+
+  if ((~*reg & bit) == bit) // INPUT OR PULLUP
+  {
+    if ((~*out & bit)  == bit) return INPUT;
+    else return INPUT_PULLUP;
+  }
+  return OUTPUT;
+}
+
 void waitForATN()
 {
+  #ifdef DEBUG_ENABLE
   Serial.println("waitForATN()");
+  #endif
   pinMode(IEC_1541_ATN, INPUT);
   long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
   
@@ -51,24 +75,32 @@ void waitForATN()
 
 void waitForClock(bool level)
 {
+  #ifdef DEBUG_ENABLE
   Serial.println("waitForClock()");
-  bool clockState = digitalRead(IEC_1541_CLOCK);
+  #endif  
+  byte modeBefore = getPinMode(IEC_1541_CLOCK);
   pinMode(IEC_1541_CLOCK, INPUT);
-
+  
+  bool clockState = digitalRead(IEC_1541_CLOCK);
   
   // sit here waiting for the clock line to go false (IEC_FALSE 5V)
   while (clockState != level)
   {
      clockState = digitalRead(IEC_1541_CLOCK);
   }
+  #ifdef DEBUG_ENABLE
   Serial.print("read Clock=");
   Serial.println(clockState);
+  #endif
+  pinMode(IEC_1541_CLOCK, modeBefore);
 }
 
 void assertData(bool level, int msec)
 {
+  #ifdef DEBUG_ENABLE
   Serial.print("assertData() ");
   Serial.println(level);
+  #endif
   pinMode(IEC_1541_DATA, OUTPUT);
   digitalWrite(IEC_1541_DATA, IEC_FALSE);  
   delay(msec);
@@ -78,16 +110,20 @@ void assertData(bool level, int msec)
 
 void holdData(bool level)
 {
+  #ifdef DEBUG_ENABLE
   Serial.print("assertData() ");
   Serial.println(level);
+  #endif
   pinMode(IEC_1541_DATA, OUTPUT);
-  digitalWrite(IEC_1541_DATA, IEC_FALSE);  
+  digitalWrite(IEC_1541_DATA, level);  
 }
 
 void readData(byte numRead)
 {
+  #ifdef DEBUG_ENABLE
   Serial.print("readData() ");
   Serial.println(numRead);
+  #endif
   
   // set both clock and data to input
   long debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
@@ -95,21 +131,22 @@ void readData(byte numRead)
   pinMode(IEC_1541_CLOCK, INPUT);
   
   byte data = 0x00;
-  
-  for (byte i = 0; i < numRead; i++)
+  byte i = 0;
+  do
   {
     waitForClock(IEC_FALSE);   
-    
-    delay(5);
-  
+
     byte temp = digitalRead(IEC_1541_DATA);
-    data = (data << 1 ) | (0×01 & temp);    
-    waitForClock(IEC_TRUE);   
+    data = data << 0x1;
+    temp &= 0x01;
+    data |= temp;    
   }
-  holdData(IEC_TRUE); // acknowledge
+  while (++i < numRead);
+  
+  holdData(IEC_TRUE); // acknowledge  
   Serial.print("******* data = ");           
   Serial.println(data);
-  Serial.println();
+  Serial.println();  
 }
 
 bool checkATN()
@@ -152,6 +189,7 @@ void diagnoseComputer()
                 holdData(IEC_FALSE);                
                 waitForClock(IEC_TRUE);                
                 readData(8); // read 8 bits then ack                
+                pinMode(IEC_1541_DATA, INPUT);
                 break;
        default: break;
      };
