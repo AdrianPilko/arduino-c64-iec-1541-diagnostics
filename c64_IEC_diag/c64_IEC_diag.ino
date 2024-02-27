@@ -15,7 +15,7 @@
 #define IEC_FALSE 1
 #define INIT_DEBUG_OUT_TIMER 60000
 #define INIT_DEBUG_OUT_TIMER2 80000
-#define IEC_1541_DATA  7 
+#define IEC_1541_DATA  2
 #define IEC_1541_CLOCK  6
 #define IEC_1541_ATN  4
 #define IEC_1541_RESET  5
@@ -73,7 +73,7 @@ void waitForATN()
   }
 }
 
-void waitForClock(bool level)
+inline void waitForClock(bool level)
 {
   #ifdef DEBUG_ENABLE
   Serial.println("waitForClock()");
@@ -95,6 +95,18 @@ void waitForClock(bool level)
   pinMode(IEC_1541_CLOCK, modeBefore);
 }
 
+inline void waitForClockIEC_FALSE()
+{
+  bool clockState = digitalRead(IEC_1541_CLOCK);
+  
+  // sit here waiting for the clock line to go false (IEC_FALSE 5V)
+  while (clockState != IEC_FALSE)
+  {
+     clockState = digitalRead(IEC_1541_CLOCK);
+  }
+}
+
+
 void assertData(bool level, int msec)
 {
   #ifdef DEBUG_ENABLE
@@ -108,7 +120,7 @@ void assertData(bool level, int msec)
 }
 
 
-void holdData(bool level)
+inline void holdData(bool level)
 {
   #ifdef DEBUG_ENABLE
   Serial.print("assertData() ");
@@ -118,6 +130,18 @@ void holdData(bool level)
   digitalWrite(IEC_1541_DATA, level);  
 }
 
+inline void holdDataIEC_TRUE()
+{
+  pinMode(IEC_1541_DATA, OUTPUT);
+  digitalWrite(IEC_1541_DATA, IEC_TRUE);  
+}
+
+inline void holdDataIEC_FALSE()
+{
+  pinMode(IEC_1541_DATA, OUTPUT);
+  digitalWrite(IEC_1541_DATA, IEC_FALSE);  
+}
+
 void readData(byte numRead)
 {
   #ifdef DEBUG_ENABLE
@@ -125,25 +149,21 @@ void readData(byte numRead)
   Serial.println(numRead);
   #endif
   
-  // set both clock and data to input
-  long debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
+  // set both clock and data to input  
   pinMode(IEC_1541_DATA, INPUT);
   pinMode(IEC_1541_CLOCK, INPUT);
   
-  byte data = 0x00;
-  byte i = 0;
+  uint8_t data = 0x00;
+  uint8_t i = 0;
   do
   {
-    waitForClock(IEC_FALSE);   
-
-    byte temp = digitalRead(IEC_1541_DATA);
-    data = data << 0x1;
-    temp &= 0x01;
-    data |= temp;    
+    waitForClockIEC_FALSE(); 
+    uint8_t theBit = digitalRead(IEC_1541_DATA);
+    data |= (theBit & 1) << i;
   }
   while (++i < numRead);
-  
-  holdData(IEC_TRUE); // acknowledge  
+
+  holdDataIEC_TRUE(); // acknowledge    
   Serial.print("******* data = ");           
   Serial.println(data);
   Serial.println();  
@@ -173,27 +193,27 @@ void diagnoseComputer()
 
   while (1)
   {
-    switch (mode)
-    {
+    //switch (mode)
+    //{
       // initially the talk holds the clock to true
       //         , the listener holds data to true
       //         , only start when ATN goes low
-      case e_select: 
-                waitForATN();
-                mode = e_data;
-            break;
-       case e_data:                
-                holdData(IEC_TRUE);                
+      //case e_select: 
+       //         waitForATN();
+       //         mode = e_data;
+       //     break;
+       //case e_data:                
+                holdDataIEC_TRUE();                
                 waitForClock(IEC_TRUE);
                 waitForClock(IEC_FALSE);                
-                holdData(IEC_FALSE);                
+                holdDataIEC_FALSE();                
                 waitForClock(IEC_TRUE);                
                 readData(8); // read 8 bits then ack                
                 pinMode(IEC_1541_DATA, INPUT);
-                break;
-       default: break;
-     };
-     Serial.println(mainLoopCount++);
+        //        break;
+       //default: break;
+     //};
+     //Serial.println(mainLoopCount++);
   }
 }
 
