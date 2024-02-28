@@ -56,20 +56,9 @@ int getPinMode(uint8_t pin)
 
 void waitForATN()
 {
-  #ifdef DEBUG_ENABLE
-  Serial.println("waitForATN()");
-  #endif
   pinMode(IEC_1541_ATN, INPUT);
-  long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
-  
-  while (digitalRead(IEC_1541_ATN) != IEC_FALSE)
+  while (digitalRead(IEC_1541_ATN) == IEC_FALSE)
   {
-     if (debugOutputTimer <= 0)
-     {
-        Serial.println("A"); 
-        debugOutputTimer = INIT_DEBUG_OUT_TIMER2;
-     }
-     debugOutputTimer--;
   }
 }
 
@@ -95,17 +84,49 @@ inline void waitForClock(bool level)
   pinMode(IEC_1541_CLOCK, modeBefore);
 }
 
-inline void waitForClockIEC_FALSE()
+inline void outputClock(bool level)
 {
-  bool clockState = digitalRead(IEC_1541_CLOCK);
-  
-  // sit here waiting for the clock line to go false (IEC_FALSE 5V)
-  while (clockState != IEC_FALSE)
+  digitalWrite(IEC_1541_CLOCK, level);
+}
+
+
+
+inline void waitForDataIEC_FALSE()
+{  
+  pinMode(IEC_1541_DATA, INPUT);
+  while (digitalRead(IEC_1541_DATA) != IEC_FALSE)
   {
-     clockState = digitalRead(IEC_1541_CLOCK);
+  }
+}
+inline void waitForDataIEC_TRUE()
+{  
+  pinMode(IEC_1541_DATA, INPUT);
+  while (digitalRead(IEC_1541_DATA) != IEC_TRUE)
+  {
   }
 }
 
+inline void waitForClockIEC_FALSE()
+{
+  pinMode(IEC_1541_CLOCK, INPUT);
+  
+  // sit here waiting for the clock line to go false (IEC_FALSE 5V)
+  while (digitalRead(IEC_1541_CLOCK)  != IEC_FALSE)
+  {
+
+  }
+}
+
+inline void waitForClockIEC_TRUE()
+{
+  pinMode(IEC_1541_CLOCK, INPUT);
+  
+  // sit here waiting for the clock line to go false (IEC_FALSE 5V)
+  while (digitalRead(IEC_1541_CLOCK)  != IEC_TRUE)
+  {
+
+  }
+}
 
 void assertData(bool level, int msec)
 {
@@ -142,27 +163,55 @@ inline void holdDataIEC_FALSE()
   digitalWrite(IEC_1541_DATA, IEC_FALSE);  
 }
 
+void writeData(uint8_t data)
+{
+  // write 8 bits to serial
+  // set both clock and data to input  
+                
+  outputClock(IEC_FALSE);
+  waitForClock(IEC_TRUE);                
+  holdDataIEC_TRUE();                
+  outputClock(IEC_TRUE);    
+
+  pinMode(IEC_1541_DATA, OUTPUT);
+  pinMode(IEC_1541_CLOCK, OUTPUT);
+
+  uint8_t i = 0;
+  uint8_t mask = 0x01;
+  do
+  {
+    outputClock(IEC_FALSE); 
+    digitalWrite(IEC_1541_DATA, data & mask);
+    outputClock(IEC_TRUE); 
+    delay(1);
+    mask = mask << 1;
+  }  
+  while (++i < 8);
+}
+
 void readData(byte numRead)
 {
-  #ifdef DEBUG_ENABLE
-  Serial.print("readData() ");
-  Serial.println(numRead);
-  #endif
+  waitForDataIEC_FALSE();                
+  holdDataIEC_TRUE();                
+  waitForClockIEC_FALSE();                
+  holdDataIEC_FALSE();   
   
+  waitForClockIEC_TRUE();
+  holdDataIEC_FALSE();    
   // set both clock and data to input  
   pinMode(IEC_1541_DATA, INPUT);
   pinMode(IEC_1541_CLOCK, INPUT);
   
+    
+  waitForClockIEC_TRUE(); 
   uint8_t data = 0x00;
   uint8_t i = 0;
   do
   {
     waitForClockIEC_FALSE(); 
-    uint8_t theBit = digitalRead(IEC_1541_DATA);
-    data |= (theBit & 1) << i;
+    data |= (digitalRead(IEC_1541_DATA) & 1) << i;
   }
   while (++i < numRead);
-
   holdDataIEC_TRUE(); // acknowledge    
   Serial.print("******* data = ");           
   Serial.println(data);
@@ -189,31 +238,32 @@ void diagnoseComputer()
   pinMode(IEC_1541_ATN, INPUT);
   pinMode(IEC_1541_RESET, OUTPUT);
 
-  digitalWrite(IEC_1541_RESET, IEC_FALSE);
+  digitalWrite(IEC_1541_RESET, IEC_TRUE);
 
   while (1)
   {
-    //switch (mode)
-    //{
-      // initially the talk holds the clock to true
-      //         , the listener holds data to true
-      //         , only start when ATN goes low
-      //case e_select: 
-       //         waitForATN();
-       //         mode = e_data;
-       //     break;
-       //case e_data:                
-                holdDataIEC_TRUE();                
-                waitForClock(IEC_TRUE);
-                waitForClock(IEC_FALSE);                
-                holdDataIEC_FALSE();                
-                waitForClock(IEC_TRUE);                
-                readData(8); // read 8 bits then ack                
-                pinMode(IEC_1541_DATA, INPUT);
-        //        break;
-       //default: break;
-     //};
-     //Serial.println(mainLoopCount++);
+    if (state == e_listener)             
+    {            
+      readData(8); // read 8 bits then ack                               
+    }
+    else if (state == e_talker)
+    {
+      writeData(0xff); // write 8 bits
+    }            
+
+    if (checkATN() == IEC_TRUE)
+    {
+      state = e_listener;
+      mode = e_data;
+      Serial.println("state = e_listener ");
+    }
+    else
+    {
+      state = e_talker;
+      mode = e_data;
+      Serial.println("state = e_talker");
+    }
+    Serial.println(mainLoopCount++);
   }
 }
 
