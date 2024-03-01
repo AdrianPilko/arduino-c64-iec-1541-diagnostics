@@ -67,41 +67,10 @@ int getPinMode(uint8_t pin)
   return OUTPUT;
 }
 
-void waitForATN()
-{
-  pinMode(IEC_1541_ATN, INPUT);
-  while (digitalRead(IEC_1541_ATN) == IEC_FALSE)
-  {
-  }
-}
-
-inline void waitForClock(bool level)
-{
-  #ifdef DEBUG_ENABLE
-  Serial.println("waitForClock()");
-  #endif  
-  byte modeBefore = getPinMode(IEC_1541_CLOCK);
-  pinMode(IEC_1541_CLOCK, INPUT);
-  
-  bool clockState = digitalRead(IEC_1541_CLOCK);
-  
-  // sit here waiting for the clock line to go false (IEC_FALSE 5V)
-  while (clockState != level)
-  {
-     clockState = digitalRead(IEC_1541_CLOCK);
-  }
-  #ifdef DEBUG_ENABLE
-  Serial.print("read Clock=");
-  Serial.println(clockState);
-  #endif
-  pinMode(IEC_1541_CLOCK, modeBefore);
-}
-
 inline void outputClock(bool level)
 {
   digitalWrite(IEC_1541_CLOCK, level);
 }
-
 
 inline void waitForDataIEC_TRUE()
 {  
@@ -119,7 +88,7 @@ inline void waitForDataIEC_FALSE()
 inline void waitForClockIEC_TRUE()
 {
   // sit here waiting for the clock line to go false (IEC_FALSE 5V)
-  while (digitalRead(IEC_1541_CLOCK)  != IEC_FALSE)
+  while (digitalRead(IEC_1541_CLOCK)  == IEC_FALSE)
   {
 
   }
@@ -133,39 +102,18 @@ inline void waitForClockIEC_FALSE()
   }
 }
 
-inline void holdDataIEC_TRUE()
+inline void assertDataIEC_TRUE()
 {
   digitalWrite(IEC_1541_DATA, IEC_TRUE);  
 }
-inline void holdDataIEC_FALSE()
+inline void assertDataIEC_FALSE()
 {
   digitalWrite(IEC_1541_DATA, IEC_FALSE);  
 }
 
 void writeData(uint8_t data)
 {
-  // write 8 bits to serial
-  // set both clock and data to input  
-                
-  outputClock(IEC_FALSE);
-  waitForClock(IEC_TRUE);                
-  holdDataIEC_TRUE();                
-  outputClock(IEC_TRUE);    
-
-  pinMode(IEC_1541_DATA, OUTPUT);
-  pinMode(IEC_1541_CLOCK, OUTPUT);
-
-  uint8_t i = 0;
-  uint8_t mask = 0x01;
-  do
-  {
-    outputClock(IEC_FALSE); 
-    digitalWrite(IEC_1541_DATA, data & mask);
-    outputClock(IEC_TRUE); 
-    delay(1);
-    mask = mask << 1;
-  }  
-  while (++i < 8);
+ /// todo
 }
 
 inline byte readData()
@@ -178,7 +126,7 @@ inline byte readData()
   pinMode(IEC_1541_DATA, OUTPUT);    
 
   waitForClockIEC_TRUE();    
-  holdDataIEC_TRUE();     
+  assertDataIEC_TRUE();     
   
   beforeEOITiming = micros();       
   waitForClockIEC_FALSE();    
@@ -187,104 +135,98 @@ inline byte readData()
   // Jim Butterfields IEC disected calls this End of indicator - which is correct ??? (does it matter - no!)
   if (afterEOITiming - beforeEOITiming > 200) 
   {
-    Serial.print("EOI ");
-    Serial.println(afterEOITiming - beforeEOITiming);
+    //Serial.print("EOI ");
+    //Serial.println(afterEOITiming - beforeEOITiming);
     /// pull data line true for 60usec
     pinMode(IEC_1541_DATA, OUTPUT);        
-    holdDataIEC_TRUE();
+    assertDataIEC_TRUE();
     beforeEOITiming = micros();
     do
     {
       afterEOITiming = micros();
     }while (afterEOITiming - beforeEOITiming <= 60);
-    holdDataIEC_FALSE();
-    pinMode(IEC_1541_DATA, INPUT);       
+    //holdDataIEC_FALSE();
+    pinMode(IEC_1541_DATA, INPUT);       // setting pin mode releases to 5V
     return 0;
   }  
-  //holdDataIEC_FALSE();    // we're ready to listen, the release is done by setting pin to INPUT
-//  pinMode(IEC_1541_CLOCK, INPUT);   
-  pinMode(IEC_1541_DATA, INPUT);   
+  pinMode(IEC_1541_DATA, INPUT);   // we're ready to listen, the release is done by setting pin to INPUT
   uint8_t data = 0x00;
   uint8_t i = 0;
   do
   {    
-    waitForClockIEC_FALSE(); 
-    data |= digitalRead(IEC_1541_DATA) << i;
+    waitForClockIEC_FALSE();     
+    byte temp = digitalRead(IEC_1541_DATA);    
+    data = temp | data;
+    data = data << 1;  
     waitForClockIEC_TRUE();     
   }
   while (++i < 8);
 
   pinMode(IEC_1541_DATA, OUTPUT);
-  holdDataIEC_TRUE(); // acknowledge    
-
-#ifdef PRINT_TIMINGS  
-  Serial.println("rd");
-  for (byte i = 0; i < 8; i++)
-    Serial.println(microsAfter[i] - microsBefore[i]);
-#endif
+  assertDataIEC_TRUE(); // acknowledge    
 
   return data;
 }
 
-bool checkATN()
+inline bool checkATN()
 {
     return digitalRead(IEC_1541_ATN);
 }
 
-byte decodeData(t_busDeviceState *busDeviceState,  t_protocolState  *protocolState, byte data)
+inline byte decodeData(byte data)
 {
-  // check if we need to decode a command sequence
-  switch (*protocolState)
-  {
-     case e_waitingForBusCommand: 
-            // commands for devices
-            if (data == BUS_IDENT | 0x20)
-            {
-                Serial.print("0x28,");
-                *busDeviceState = e_listen;                  
-            }
-            if (data == 0x3f) 
-            {   
-              Serial.print("0x3f,");
-              *busDeviceState = e_unlisten; 
-            }
-            if (data == BUS_IDENT | 0x40)
-            {
-                Serial.print("0x48,");
-                *busDeviceState = e_talk;
-            }                
-            if (data == 0x5f) 
-            {
-                Serial.print("0x5f,");
-                *busDeviceState = e_untalk;
-            }
-
-            if (*busDeviceState == e_listen)
-            {
-              //these all assume channel 0 for now    (channe0 | 0x60) == 0x60
-              if (data == 0x60)  
-              {
-                Serial.print("0x60");                          
-              }
-              if (data == 0xe0)
-              {
-                Serial.println("close channel");
-              }
-              if (data == 0xf0) 
-              {
-                Serial.println("open channel");                
-              }
-            }
-
-      break;
-    case e_ReadingData: Serial.print("Data = ");
-                        Serial.println(data);
-                        
-      break;
-    case e_WritingData:Serial.println("in wrong bus state under ATN"); break;  // should never happen
-
-    default: break;
-  }
+  /*
+https://en.wikipedia.org/wiki/Commodore_bus
+  High level protocol[10]
+Command	Destination	Meaning
+/28	Device	Listen, device number 8
+/F0	Device	Open channel 0
+Device	Send filename bytes
+/3F	Devices	Unlisten all devices
+/48	Device	Talk, Device number 8
+/60	Device	Reopen channel 0
+Device number 8 becomes the master of the bus
+Host	Receive byte data
+The host becomes the master of the bus (normal operation)
+/5F	Devices	Untalk all devices
+/28	Device	Listen, device number 8
+/E0	Device	Close channel 0
+/3F	Devices	Unlisten all devices
+*/
+    if (data == 0x28)   // for bus device = 8
+    {
+      Serial.print("28,");
+    }
+    else if (data == 0x3f) 
+    {   
+      Serial.print("3f,");
+    }
+    else if (data == 0x48)
+    {
+      Serial.print("48,");
+    }                
+    else if (data == 0x5f) 
+    {
+      Serial.print("5f,");
+    }
+    //these all assume channel 0 for now    (channe0 | 0x60) == 0x60
+    else if (data == 0x60)  
+    {
+      Serial.print("60,");                          
+    }
+    else if (data == 0xe0)
+    {
+      Serial.print("e0,");
+    }
+    else if (data == 0xf0) 
+    {
+      Serial.print("f0,");                
+    }
+    else
+    {
+      Serial.println(data);
+    }
+    
 }
 
 void diagnoseComputer()
@@ -293,7 +235,6 @@ void diagnoseComputer()
 
   long debugOutputTimer = INIT_DEBUG_OUT_TIMER;
   t_busDeviceState busDeviceState = e_unlisten;  
-  t_busMode        busMode  = e_ATNCommands;
   t_protocolState  protocolState = e_waitingForBusCommand;
   byte data = 0;
   byte nextDataToSend = 0;
@@ -305,36 +246,15 @@ void diagnoseComputer()
   pinMode(IEC_1541_RESET, INPUT);
 
   while (1)
-  {
-
-    if (checkATN() == IEC_TRUE)  // if this is true it means drop everything and listen
-    {
-      busMode = e_ATNCommands;
-      protocolState = e_waitingForBusCommand;       
-      data = readData(); // read 8 bits then ack                                     
-      sendSequence = decodeData(&busDeviceState, &protocolState, data);            
-      data = readData(); // read 8 bits then ack                                     
-      sendSequence = decodeData(&busDeviceState, &protocolState, data);            
-    }
-    else if (protocolState == e_ReadingData)
-    {
-      if (busDeviceState == e_listen)
+  {     
+      do 
       {
-        data = readData(); // read 8 bits then ack                               
-        sendSequence = decodeData(&busDeviceState, &protocolState, data);
-      }
-      else if (busDeviceState == e_talk)
-      {
-        // probably just start by sending a standard sequence like after LOAD"file",8
-        writeData(dataSequences[sendSequence][nextDataToSend]);      
-        if (nextDataToSend++ >= MAX_SEND_DATA)
-        {
-          nextDataToSend=0;
-          // put mode back to listen
-          /// todo
-        }
-      }
-    }
+           
+      } while (checkATN() == IEC_FALSE);
+      //protocolState = e_waitingForBusCommand;    
+      data = readData(); // read 8 bits then ack
+      //sendSequence = decodeData(data);       
+      Serial.println(data,HEX);
   }
 }
 
@@ -350,17 +270,84 @@ void listenToBus()
   pinMode(IEC_1541_CLOCK, INPUT);
   pinMode(IEC_1541_ATN, INPUT);
   pinMode(IEC_1541_RESET, INPUT);
+
+  unsigned long beforeTiming = 0;
+  unsigned long afterTiming = 0;
   
+  bool readVal_Clock = digitalRead(IEC_1541_CLOCK);
+  bool readVal_Data = digitalRead(IEC_1541_DATA);
+  bool readVal_ATN = digitalRead(IEC_1541_ATN);
+  bool readVal_Reset = digitalRead(IEC_1541_RESET);
+
+  bool prevClock = !readVal_Clock;
+  bool prevData = !readVal_Data;
+  bool prevATN = !readVal_ATN;
+  bool prevReset = !readVal_Reset;
+  uint32_t updateCount = 0;
+
   while(1)
-  {
-    Serial.print("CLOCK=");
-    Serial.print(digitalRead(IEC_1541_CLOCK));
-    Serial.print("\tDATA="); 
-    Serial.print(digitalRead(IEC_1541_DATA));
-    Serial.print("\tATN=");
-    Serial.print(digitalRead(IEC_1541_ATN));    
-    Serial.print("\tRESET=");
-    Serial.println(digitalRead(IEC_1541_RESET));
+  {    
+    bool hadPrinted = false;
+    
+    beforeTiming = micros();       
+    
+    
+    if (prevClock != readVal_Clock)
+    {
+      Serial.print(readVal_Clock);
+      Serial.print(":");
+      Serial.print(readVal_Data);
+      Serial.print(":");
+      Serial.println(readVal_ATN);  
+     // hadPrinted = true;
+    }
+    else if (prevData != readVal_Data)
+    {
+      Serial.print(readVal_Clock);
+      Serial.print(",");
+      Serial.print(readVal_Data);
+      Serial.print(",");
+      Serial.println(readVal_ATN);  
+     // hadPrinted = true;
+    }
+    else if (prevATN != readVal_ATN)
+    {
+      Serial.print(readVal_Clock);
+      Serial.print(",");
+      Serial.print(readVal_Data);
+      Serial.print(",");
+      Serial.println(readVal_ATN);  
+    //  hadPrinted = true;
+    }
+//    if (prevReset != readVal_Reset)
+ //   {
+  //    Serial.print("\tATN=");
+   //   Serial.print(readVal_Reset);  
+   //   hadPrinted = true;  
+    //}
+    //if (hadPrinted == true)
+   // {
+    //  Serial.print(",");
+    //  Serial.print(updateCount++);      
+    //}
+
+    prevClock = readVal_Clock;
+    prevData = readVal_Data;
+    prevATN = readVal_ATN;
+    prevReset = readVal_Reset;
+
+    readVal_Clock = digitalRead(IEC_1541_CLOCK);
+    readVal_Data = digitalRead(IEC_1541_DATA);
+    readVal_ATN = digitalRead(IEC_1541_ATN);
+    readVal_Reset = digitalRead(IEC_1541_RESET);    
+
+    //afterTiming = micros();    
+    //if (hadPrinted == true)
+   // {
+    //  Serial.print(",");
+     // Serial.println(afterTiming - beforeTiming); 
+   // }
+
   }
 }
 
@@ -368,7 +355,7 @@ void listenToBus()
 
 void setup() 
 {
-  Serial.begin(9600);
+  Serial.begin(250000);
   // only set the pins in the other functions since it depends on if listener or talker and
   // the mode changes through the duration of the execution of the protocol
 }
@@ -379,13 +366,10 @@ void loop()
   Serial.println();
   Serial.write("Enter mode - 1==diagnose computer, 2== diagnose drive, 3==listen to bus");
   Serial.println();  
-  //while (Serial.available() <= 0) delay(20);
-  //commandMode = Serial.read();
-  //Serial.println(commandMode);
+  while (Serial.available() <= 0) delay(20);
+  commandMode = Serial.read();
+  Serial.println(commandMode);
   
-  /////TESTING DEFAULT TO 1 diagnose computer
-  commandMode = '1';
-
   switch (commandMode)
   {
     case '1' : Serial.println("Disagnosing computer"); diagnoseComputer(); break;
