@@ -247,10 +247,10 @@ void diagnoseComputer()
 
   while (1)
   {     
-      do 
-      {
+     // do 
+    //  {
            
-      } while (checkATN() == IEC_FALSE);
+   //   } while (checkATN() == IEC_FALSE);
       //protocolState = e_waitingForBusCommand;    
       data = readData(); // read 8 bits then ack
       //sendSequence = decodeData(data);       
