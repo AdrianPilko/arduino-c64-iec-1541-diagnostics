@@ -331,7 +331,7 @@ void listenToBus()
     //  Serial.print(updateCount++);      
     //}
 
-    prevClock = readVal_Clock;
+     prevClock = readVal_Clock;
     prevData = readVal_Data;
     prevATN = readVal_ATN;
     prevReset = readVal_Reset;
@@ -348,6 +348,40 @@ void listenToBus()
      // Serial.println(afterTiming - beforeTiming); 
    // }
 
+  }
+}
+
+void testPinResponse()
+{
+  pinMode(IEC_1541_CLOCK, INPUT);
+  while (1)
+  {
+    // attempt to count rising edge transitions on square wave for 1 seconds at 100KHz - this is at an interval of 10microseconds
+    // will include some "realistic"  logic and timing functions as well as the actual function used in the code above to wait for clock
+    unsigned long before = micros();
+    unsigned long during = 0;
+    bool finished = false;
+    unsigned long count = 0;
+
+    Serial.println("reading clock pin for 1 second");
+    do
+    {
+      waitForClockIEC_FALSE();
+      waitForClockIEC_TRUE();
+      count++;
+      
+      during = micros();
+
+      if (during - before > 1000000)
+      {
+        finished = true;
+      }
+    } while (!finished);
+    Serial.print("got rising edge count of ");
+    Serial.print(count); 
+    Serial.print(" in ");
+    Serial.print(during - before);
+    Serial.print("micro seconds");
   }
 }
 
@@ -375,6 +409,7 @@ void loop()
     case '1' : Serial.println("Disagnosing computer"); diagnoseComputer(); break;
     case '2' : Serial.println("Disagnosing drive"); diagnoseDrive(); break;
     case '3' : Serial.println("listen to bus"); listenToBus(); break;
+    case '4' : Serial.println("inject from signal generator to test pins"); testPinResponse(); break;
     default : break;
   }
 }
